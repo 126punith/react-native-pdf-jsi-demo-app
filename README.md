@@ -1,8 +1,13 @@
 # 📚 React Native PDF JSI - Demo App
 
-> **A comprehensive demonstration app showcasing all features of the `react-native-pdf-jsi` package**
+> **A comprehensive demonstration app showcasing all features of the [`react-native-pdf-jsi`](https://www.npmjs.com/package/react-native-pdf-jsi) package**
 
-This demo app provides a complete reference implementation of all PDF viewing, bookmarking, export, and analytics features available in the `react-native-pdf-jsi` package. Use this as a starting point for your own PDF viewer applications.
+This demo app provides a complete reference implementation of all PDF viewing, bookmarking, export, and analytics features available in the [`react-native-pdf-jsi`](https://www.npmjs.com/package/react-native-pdf-jsi) package. Use this as a starting point for your own PDF viewer applications.
+
+[![npm version](https://img.shields.io/npm/v/react-native-pdf-jsi?style=flat-square&logo=npm&color=cb3837)](https://www.npmjs.com/package/react-native-pdf-jsi)
+[![npm downloads](https://img.shields.io/npm/dt/react-native-pdf-jsi?style=flat-square&logo=npm&color=cb3837)](https://www.npmjs.com/package/react-native-pdf-jsi)
+[![GitHub stars](https://img.shields.io/github/stars/126punith/react-native-pdf-jsi?style=flat-square&logo=github&color=181717)](https://github.com/126punith/react-native-pdf-jsi)
+[![license](https://img.shields.io/npm/l/react-native-pdf-jsi?style=flat-square&color=green)](https://github.com/126punith/react-native-pdf-jsi/blob/main/LICENSE)
 
 ---
 
@@ -81,6 +86,11 @@ cd DemoApp
 ```bash
 npm install
 ```
+
+> **Note**: This demo app uses `react-native-pdf-jsi` v3.4.0. To install the latest version in your own project:
+> ```bash
+> npm install react-native-pdf-jsi@latest
+> ```
 
 3. **Install iOS dependencies** (iOS only)
 
@@ -310,8 +320,13 @@ useEffect(() => {
 ## 🔗 Package Documentation
 
 For detailed package documentation, visit:
-- [react-native-pdf-jsi README](../react-native-enhanced-pdf/README.md)
-- [Package Examples](../react-native-enhanced-pdf/EXAMPLES.md)
+
+- 📖 **[Package README](https://github.com/126punith/react-native-pdf-jsi/blob/main/README.md)** - Complete documentation
+- 📦 **[NPM Package](https://www.npmjs.com/package/react-native-pdf-jsi)** - Install and view package
+- 🌐 **[Documentation Website](https://euphonious-faun-24f4bc.netlify.app/)** - Interactive API reference
+- 💻 **[GitHub Repository](https://github.com/126punith/react-native-pdf-jsi)** - Source code and issues
+- 🐛 **[Report Issues](https://github.com/126punith/react-native-pdf-jsi/issues)** - Bug reports and feature requests
+- 💬 **[Discussions](https://github.com/126punith/react-native-pdf-jsi/discussions)** - Community discussions
 
 ---
 
@@ -323,20 +338,44 @@ This demo app is provided as-is for reference purposes. The `react-native-pdf-js
 
 ## 🤝 Contributing
 
-This is a demo/reference app. For issues or feature requests related to the package itself, please refer to the main package repository.
+This is a demo/reference app. For issues or feature requests related to the package itself, please refer to the [main package repository](https://github.com/126punith/react-native-pdf-jsi).
+
+- 🐛 **[Report Package Issues](https://github.com/126punith/react-native-pdf-jsi/issues)** - Report bugs or request features
+- 💡 **[Submit Demo App Improvements](https://github.com/126punith/react-native-pdf-jsi/issues/new)** - Suggest improvements to this demo
+- 📝 **[Contribution Guidelines](https://github.com/126punith/react-native-pdf-jsi/blob/main/CONTRIBUTING.md)** - How to contribute to the package
 
 ---
 
 ## 📞 Support
 
 For questions about:
-- **Package features**: Check the main package README
-- **This demo app**: Review the code comments and implementation patterns
-- **Integration help**: See the code examples in this app
+
+- **Package features**: 
+  - 📖 [Package README](https://github.com/126punith/react-native-pdf-jsi/blob/main/README.md)
+  - 🌐 [Documentation Website](https://euphonious-faun-24f4bc.netlify.app/)
+- **This demo app**: Review the code comments and implementation patterns in this repository
+- **Integration help**: See the code examples in this app's `App.tsx` file
+- **Bug Reports**: 
+  - 🐛 [Open an Issue](https://github.com/126punith/react-native-pdf-jsi/issues)
+  - 💬 [Start a Discussion](https://github.com/126punith/react-native-pdf-jsi/discussions)
 
 ---
 
-**Built with `react-native-pdf-jsi` v3.0.1**
+## 📦 Package Information
+
+- **Package Name**: [`react-native-pdf-jsi`](https://www.npmjs.com/package/react-native-pdf-jsi)
+- **Version**: `3.4.0` (Latest)
+- **License**: MIT
+- **GitHub**: [https://github.com/126punith/react-native-pdf-jsi](https://github.com/126punith/react-native-pdf-jsi)
+- **NPM**: [https://www.npmjs.com/package/react-native-pdf-jsi](https://www.npmjs.com/package/react-native-pdf-jsi)
+- **Documentation**: [https://euphonious-faun-24f4bc.netlify.app/](https://euphonious-faun-24f4bc.netlify.app/)
+
+---
+
+**Built with [`react-native-pdf-jsi`](https://www.npmjs.com/package/react-native-pdf-jsi) v3.4.0**
 
 **Last Updated**: 2025-11-29
+
+---
+
 # react-native-pdf-jsi-demo-app
