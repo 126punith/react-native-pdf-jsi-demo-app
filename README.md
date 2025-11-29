@@ -1,97 +1,342 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# 📚 React Native PDF JSI - Demo App
 
-# Getting Started
+> **A comprehensive demonstration app showcasing all features of the `react-native-pdf-jsi` package**
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+This demo app provides a complete reference implementation of all PDF viewing, bookmarking, export, and analytics features available in the `react-native-pdf-jsi` package. Use this as a starting point for your own PDF viewer applications.
 
-## Step 1: Start Metro
+---
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+## 🎯 Purpose
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+This demo app serves as:
 
-```sh
-# Using npm
-npm start
+- **Reference Implementation** - See how to integrate all package features correctly
+- **Testing Ground** - Verify package functionality and features
+- **Learning Resource** - Understand best practices for PDF viewer apps
+- **GitHub Showcase** - Demonstrate the package's capabilities to developers
 
-# OR using Yarn
-yarn start
+---
+
+## ✨ Features Demonstrated
+
+### Core Features
+- ✅ PDF viewing with zoom, pan, and navigation
+- ✅ Page-by-page navigation
+- ✅ Real-time page tracking
+
+### Bookmarks
+- ✅ Create bookmarks with custom names and colors
+- ✅ View all bookmarks in a list
+- ✅ Navigate to bookmarked pages
+- ✅ Delete bookmarks
+- ✅ Visual bookmark indicator on PDF viewer
+
+### Export
+- ✅ Export single page to image (PNG/JPEG)
+- ✅ Export multiple pages to images
+- ✅ Export custom page ranges
+- ✅ Export PDF text content
+- ✅ All exports saved to Downloads/PDFDemoApp folder
+
+### PDF Operations
+- ✅ Split PDF into multiple files
+- ✅ Extract specific pages to new PDF
+- ✅ Rotate pages
+- ✅ Compress PDF files
+- ✅ All operations save results to Downloads folder
+
+### Analytics
+- ✅ Reading progress tracking
+- ✅ Time spent per session
+- ✅ Pages read statistics
+- ✅ Reading speed metrics
+- ✅ Session history
+
+### File Management (Android)
+- ✅ Download PDFs to public storage
+- ✅ Open Downloads folder
+- ✅ Files visible in system file manager
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Node.js >= 20
+- React Native 0.82+
+- Android Studio (for Android development)
+- Xcode (for iOS development, macOS only)
+
+### Installation
+
+1. **Clone or download this repository**
+
+```bash
+cd DemoApp
 ```
 
-## Step 2: Build and run your app
+2. **Install dependencies**
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+```bash
+npm install
+```
 
-### Android
+3. **Install iOS dependencies** (iOS only)
 
-```sh
-# Using npm
+```bash
+cd ios && bundle exec pod install && cd ..
+```
+
+4. **Run the app**
+
+```bash
+# Android
 npm run android
 
-# OR using Yarn
-yarn android
-```
-
-### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
-```
-
-Then, and every time you update your native dependencies, run:
-
-```sh
-bundle exec pod install
-```
-
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
+# iOS
 npm run ios
-
-# OR using Yarn
-yarn ios
 ```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+---
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+## 📁 Project Structure
 
-## Step 3: Modify your app
+```
+DemoApp/
+├── App.tsx                 # Main application component
+├── components/
+│   └── BookmarkIndicator.jsx  # Floating bookmark button component
+├── node_modules/
+│   └── react-native-pdf-jsi/  # Package installed locally
+├── android/                # Android native code
+├── ios/                    # iOS native code
+└── README.md              # This file
+```
 
-Now that you have successfully run the app, let's make changes!
+---
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+## 🎨 UI Components
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+The app uses components from `react-native-pdf-jsi` package:
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+- **Toolbar** - Top navigation bar with feature buttons
+- **BookmarkModal** - Create/edit bookmarks
+- **BookmarkListModal** - View all bookmarks
+- **BookmarkIndicator** - Floating bookmark button
+- **ExportMenu** - Export options menu
+- **OperationsMenu** - PDF operations menu
+- **AnalyticsPanel** - Reading analytics display
+- **Toast** - Notification messages
+- **LoadingOverlay** - Loading indicator
 
-## Congratulations! :tada:
+---
 
-You've successfully run and modified your React Native App. :partying_face:
+## 📤 File Saving
 
-### Now what?
+All exported files and PDF operations save to:
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+**Android**: `Downloads/PDFDemoApp/`
 
-# Troubleshooting
+Files are saved using Android's MediaStore API (Android 10+) for proper visibility in file managers.
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+### Exported Files Location
 
-# Learn More
+- **Images**: `Downloads/PDFDemoApp/page_1_*.jpeg`
+- **Extracted PDFs**: `Downloads/PDFDemoApp/*_extracted_*.pdf`
+- **Split PDFs**: `Downloads/PDFDemoApp/*_part_*.pdf`
 
-To learn more about React Native, take a look at the following resources:
+All operations show success alerts with "Open Folder" option to view saved files.
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+---
+
+## 🔧 Key Implementation Patterns
+
+### 1. PDF Path Management
+
+The app uses multiple strategies to get the PDF file path:
+
+```typescript
+const getPDFLocalPath = async (): Promise<string | null> => {
+  // Method 1: From state (set by onLoadComplete)
+  if (pdfFilePath && pdfFilePath.trim() !== '') {
+    return pdfFilePath;
+  }
+  
+  // Method 2: From PDF component ref
+  if (pdfRef.current?.getPath) {
+    return pdfRef.current.getPath();
+  }
+  
+  // Method 3: From component state
+  if (pdfRef.current?.state?.path) {
+    return pdfRef.current.state.path;
+  }
+  
+  return null;
+};
+```
+
+### 2. File Download Pattern
+
+All exports follow this pattern:
+
+```typescript
+// 1. Export to cache first
+const imagePath = await exportManager.exportPageToImage(...);
+
+// 2. Download to public Downloads folder
+const downloadedFiles = await downloadExportedPDFs(imagePath);
+
+// 3. Show success alert with Open Folder option
+Alert.alert('✅ Export Successful', message, [
+  { text: 'Done' },
+  { 
+    text: 'Open Folder',
+    onPress: () => FileManager.openDownloadsFolder()
+  }
+]);
+```
+
+### 3. Page Number Handling
+
+**Important**: ExportManager expects 1-indexed page numbers (Page 1, Page 2, etc.)
+
+```typescript
+// ✅ Correct - Pass 1-indexed page number
+await exportManager.exportPageToImage(pdfPath, pageNumber);
+
+// ❌ Wrong - Don't convert to 0-indexed
+await exportManager.exportPageToImage(pdfPath, pageNumber - 1);
+```
+
+The ExportManager handles conversion to 0-indexed internally for native modules.
+
+---
+
+## 📱 Usage Examples
+
+### Export Current Page
+
+```typescript
+await handleExport({
+  type: 'single',
+  page: currentPage,
+  format: 'jpeg',
+  quality: 0.9
+});
+```
+
+### Extract Pages
+
+```typescript
+await handlePDFOperation('extract', {
+  pages: [1, 5, 10] // 1-indexed page numbers
+});
+```
+
+### Split PDF
+
+```typescript
+await handlePDFOperation('split', {
+  ranges: [1, 5, 6, 10] // Flat array: [start1, end1, start2, end2]
+});
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### PDF Not Loading
+
+- Check internet connection if loading from URL
+- Verify PDF file exists if loading from local path
+- Check console logs for error messages
+
+### Exports Not Working
+
+- Ensure PDF has fully loaded (`pdfFilePath` is set)
+- Check that file path is valid (not empty or URI)
+- Verify native module is available
+
+### Files Not Visible in Downloads
+
+- Android 10+: Files use MediaStore API, should be visible automatically
+- Check `Downloads/PDFDemoApp/` folder specifically
+- Use "Open Folder" button in success alert
+
+### Bookmark Issues
+
+- PDF must be loaded before creating bookmarks
+- Check that `pdfIdentifier` or `pdfFilePath` is set
+- BookmarkManager must be initialized
+
+---
+
+## 📝 Code Highlights
+
+### State Management
+
+```typescript
+// Core PDF State
+const [pdfFilePath, setPdfFilePath] = useState<string>('');
+const [currentPage, setCurrentPage] = useState<number>(1);
+const [totalPages, setTotalPages] = useState<number>(0);
+
+// Feature State
+const [bookmarks, setBookmarks] = useState<any[]>([]);
+const [currentBookmark, setCurrentBookmark] = useState<any>(null);
+const [analytics, setAnalytics] = useState<any>(null);
+```
+
+### Manager Initialization
+
+```typescript
+useEffect(() => {
+  const initializeManagers = async () => {
+    // Import singleton instances
+    exportManager = require('react-native-pdf-jsi/src/managers/ExportManager').default;
+    bookmarkManager = require('react-native-pdf-jsi/src/managers/BookmarkManager').default;
+    
+    // Initialize if needed
+    await bookmarkManager.initialize();
+  };
+  initializeManagers();
+}, []);
+```
+
+---
+
+## 🔗 Package Documentation
+
+For detailed package documentation, visit:
+- [react-native-pdf-jsi README](../react-native-enhanced-pdf/README.md)
+- [Package Examples](../react-native-enhanced-pdf/EXAMPLES.md)
+
+---
+
+## 📄 License
+
+This demo app is provided as-is for reference purposes. The `react-native-pdf-jsi` package may have its own license terms.
+
+---
+
+## 🤝 Contributing
+
+This is a demo/reference app. For issues or feature requests related to the package itself, please refer to the main package repository.
+
+---
+
+## 📞 Support
+
+For questions about:
+- **Package features**: Check the main package README
+- **This demo app**: Review the code comments and implementation patterns
+- **Integration help**: See the code examples in this app
+
+---
+
+**Built with `react-native-pdf-jsi` v3.0.1**
+
+**Last Updated**: 2025-11-29
+# react-native-pdf-jsi-demo-app

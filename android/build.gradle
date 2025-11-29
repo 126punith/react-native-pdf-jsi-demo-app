@@ -19,3 +19,13 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+// Configure react-native-nitro-modules prepareHeaders task to handle duplicates
+// Use gradle.afterProject to configure when each project is evaluated
+gradle.afterProject { project ->
+    if (project.name == 'react-native-nitro-modules') {
+        project.tasks.withType(Copy) { task ->
+            task.duplicatesStrategy = DuplicatesStrategy.INCLUDE
+        }
+    }
+}

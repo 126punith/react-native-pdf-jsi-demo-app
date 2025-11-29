@@ -1,6 +1,7 @@
 package com.demoapp
 
 import android.app.Application
+import android.util.Log
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -22,6 +23,20 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    
+    // Initialize Nitro Modules native library (MUST be before loadReactNative)
+    // Use reflection to avoid compilation errors if library is not linked
+    try {
+      val initClass = Class.forName("org.wonday.pdf.RNPDFJSIInit")
+      val initMethod = initClass.getDeclaredMethod("initializeNative")
+      initMethod.invoke(null)
+      Log.d("MainApplication", "Nitro Modules initialized successfully")
+    } catch (e: ClassNotFoundException) {
+      Log.w("MainApplication", "RNPDFJSIInit not found - library may not be linked. Error: ${e.message}")
+    } catch (e: Exception) {
+      Log.e("MainApplication", "Failed to initialize Nitro Modules: ${e.message}")
+    }
+    
     loadReactNative(this)
   }
 }
