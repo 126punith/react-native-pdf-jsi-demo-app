@@ -1,7 +1,18 @@
 /**
- * Comprehensive PDF Features Test App
- * Tests all features from react-native-pdf-jsi package
- *
+ * React Native PDF JSI - Demo App
+ * 
+ * A comprehensive demonstration app showcasing all features of react-native-pdf-jsi package.
+ * This app serves as a reference implementation for developers integrating PDF viewing
+ * capabilities into their React Native applications.
+ * 
+ * Features demonstrated:
+ * - PDF viewing with navigation and zoom
+ * - Bookmarks with custom colors and notes
+ * - Export to images (PNG/JPEG)
+ * - PDF operations (split, extract, rotate, compress)
+ * - Reading analytics and progress tracking
+ * - File management (Android)
+ * 
  * @format
  */
 
@@ -17,6 +28,7 @@ import {
   Alert,
   Platform,
   Share,
+  NativeModules,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
@@ -28,8 +40,9 @@ import Pdf from 'react-native-pdf-jsi';
 // @ts-ignore - Package exports may not have complete type definitions
 let ExportManagerClass: any, BookmarkManagerClass: any, AnalyticsManagerClass: any;
 let FileManager: any, CacheManager: any;
-let Toolbar: any, BookmarkModal: any, BookmarkListModal: any;
-let ExportMenu: any, OperationsMenu: any, AnalyticsPanel: any, Toast: any, LoadingOverlay: any;
+  let Toolbar: any, BookmarkModal: any, BookmarkListModal: any;
+  let ExportMenu: any, OperationsMenu: any, AnalyticsPanel: any, Toast: any, LoadingOverlay: any;
+  let BookmarkIndicator: any;
 
 try {
   const packageExports = require('react-native-pdf-jsi');
@@ -50,6 +63,16 @@ try {
   AnalyticsPanel = packageExports?.AnalyticsPanel;
   Toast = packageExports?.Toast;
   LoadingOverlay = packageExports?.LoadingOverlay;
+  
+  // Try to import BookmarkIndicator from package or use local component
+  BookmarkIndicator = packageExports?.BookmarkIndicator;
+  if (!BookmarkIndicator) {
+    try {
+      BookmarkIndicator = require('./components/BookmarkIndicator').default;
+    } catch (e) {
+      console.warn('BookmarkIndicator not available');
+    }
+  }
 } catch (error) {
   console.error('Failed to import package exports:', error);
 }
@@ -93,6 +116,7 @@ function App() {
 
   // Bookmarks State
   const [bookmarks, setBookmarks] = useState<any[]>([]);
+  const [currentBookmark, setCurrentBookmark] = useState<any>(null);
 
   // JSI State
   const [jsiAvailable, setJsiAvailable] = useState<boolean>(false);
@@ -199,6 +223,14 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdfIdentifier, pdfFilePath]); // bookmarkManager and load functions are stable references
+
+  // Reload bookmarks when page changes (to update currentBookmark)
+  useEffect(() => {
+    if (bookmarks.length > 0) {
+      const pageBookmark = bookmarks.find((b: any) => b.page === currentPage);
+      setCurrentBookmark(pageBookmark || null);
+    }
+  }, [currentPage, bookmarks]);
 
   // Log bookmark modal visibility changes
   useEffect(() => {
@@ -321,6 +353,13 @@ function App() {
     console.log(`📄 Page changed: ${page}/${numberOfPages}`);
     setCurrentPage(page);
     
+    // Update totalPages (always update if different, or if not set yet)
+    // This ensures totalPages is available even if onLoadComplete wasn't called
+    if (numberOfPages > 0 && (totalPages === 0 || totalPages !== numberOfPages)) {
+      console.log(`📄 [App] Updating totalPages from handlePageChanged: ${numberOfPages} (was: ${totalPages})`);
+      setTotalPages(numberOfPages);
+    }
+    
     // Extract path from PDF component if not already set
     // This is a fallback in case handleLoadComplete wasn't called or didn't receive the path
     if ((!pdfFilePath || pdfFilePath.trim() === '') && pdfRef.current) {
@@ -359,6 +398,10 @@ function App() {
         console.warn('⚠️ [App] Skipping progress update - BookmarkManager not available');
       }
     }
+    
+    // Update current bookmark for new page
+    const pageBookmark = bookmarks.find((b: any) => b.page === page);
+    setCurrentBookmark(pageBookmark || null);
   };
 
   // Toast Helper
@@ -453,7 +496,12 @@ function App() {
       });
       
       setBookmarks(allBookmarks || []);
-      console.log('📚 [App] Bookmarks state updated');
+      
+      // Check if current page has a bookmark
+      const pageBookmark = allBookmarks?.find((b: any) => b.page === currentPage);
+      setCurrentBookmark(pageBookmark || null);
+      
+      console.log('📚 [App] Bookmarks state updated, current page bookmark:', pageBookmark ? 'yes' : 'no');
     } catch (error: any) {
       console.error('❌ [App] Failed to load bookmarks:', error);
       console.error('❌ [App] Error details:', {
@@ -498,16 +546,229 @@ function App() {
   };
 
   const handleNavigateToBookmark = (page: number) => {
-    console.log('🧭 [App] handleNavigateToBookmark called:', { page });
+    console.log(`🧭 [App] handleNavigateToBookmark: Jumping to page ${page}`);
+    console.log(`🧭 [App] Current state - currentPage: ${currentPage}, totalPages: ${totalPages}`);
     
-    if (pdfRef.current && pdfRef.current.setPage) {
-      console.log('🧭 [App] Navigating to page:', page);
-      pdfRef.current.setPage(page);
-    } else {
-      console.warn('⚠️ [App] PDF ref not available or setPage not available');
+    // Basic validation - page must be at least 1
+    if (page < 1) {
+      console.error(`❌ [App] Invalid page: ${page} (must be >= 1)`);
+      showToast(`Invalid page number`, 'error');
+      return;
     }
+    
+    // Validate against totalPages if we have it
+    // If totalPages is 0, allow navigation anyway - PDF component will handle validation
+    if (totalPages > 0 && page > totalPages) {
+      console.error(`❌ [App] Invalid page: ${page} (total: ${totalPages})`);
+      showToast(`Invalid page number`, 'error');
+      return;
+    }
+    
+    // Close bookmark list first
     setShowBookmarkList(false);
-    showToast(`Navigated to page ${page}`);
+    
+    // If navigating to the same page, force a state change to trigger re-render
+    // Temporarily set to 0, then to target page
+    if (currentPage === page) {
+      console.log(`🧭 [App] Same page detected (${page}), forcing state change to trigger navigation`);
+      setCurrentPage(0);
+      // Use setTimeout to ensure state update is processed before setting target page
+      setTimeout(() => {
+        setCurrentPage(page);
+        // Also call setPage on ref to ensure native navigation
+        if (pdfRef.current && typeof pdfRef.current.setPage === 'function') {
+          setTimeout(() => {
+            try {
+              pdfRef.current.setPage(page);
+            } catch (error: any) {
+              console.warn(`⚠️ [App] setPage call failed:`, error?.message);
+            }
+          }, 50);
+        }
+      }, 10);
+    } else {
+      // Different page - normal navigation
+      console.log(`🧭 [App] Updating currentPage state from ${currentPage} to ${page}`);
+      setCurrentPage(page);
+      
+      // Call setPage on ref to ensure native navigation happens
+      if (pdfRef.current && typeof pdfRef.current.setPage === 'function') {
+        setTimeout(() => {
+          try {
+            console.log(`🧭 [App] Calling setPage on PDF ref for page ${page}`);
+            pdfRef.current.setPage(page);
+          } catch (error: any) {
+            console.warn(`⚠️ [App] setPage call failed:`, error?.message);
+          }
+        }, 100);
+      }
+    }
+    
+    showToast(`Jumped to page ${page}`, 'success');
+    console.log(`✅ [App] Page state updated to ${page} - navigation triggered`);
+  };
+
+  // ============================================
+  // FILE SAVING HELPERS
+  // ============================================
+
+  /**
+   * Get PDF local file path from multiple sources
+   * @returns {Promise<string | null>} PDF file path or null if not available
+   */
+  const getPDFLocalPath = async (): Promise<string | null> => {
+    try {
+      // Method 1: Get from state (already set by onLoadComplete)
+      if (pdfFilePath && pdfFilePath.trim() !== '') {
+        console.log('📁 [getPDFLocalPath] Using stored path:', pdfFilePath);
+        return pdfFilePath;
+      }
+      
+      // Method 2: Try to get from PDF ref
+      if (pdfRef.current?.getPath) {
+        const refPath = pdfRef.current.getPath();
+        if (refPath && refPath.trim() !== '') {
+          console.log('📁 [getPDFLocalPath] Got path from PDF ref:', refPath);
+          setPdfFilePath(refPath);
+          return refPath;
+        }
+      }
+      
+      // Method 3: Try from PDF ref state
+      if (pdfRef.current?.state?.path) {
+        const refPath = pdfRef.current.state.path;
+        if (refPath && refPath.trim() !== '') {
+          console.log('📁 [getPDFLocalPath] Got path from PDF ref state:', refPath);
+          setPdfFilePath(refPath);
+          return refPath;
+        }
+      }
+      
+      console.warn('⚠️ [getPDFLocalPath] Could not determine PDF local path');
+      return null;
+    } catch (error: any) {
+      console.error('❌ [getPDFLocalPath] Error getting PDF path:', error);
+      return null;
+    }
+  };
+
+  /**
+   * Download exported files to public Downloads folder
+   * @param {string | string[]} filePaths - Single file path or array of file paths
+   * @returns {Promise<string[]>} Array of downloaded file paths
+   */
+  const downloadExportedPDFs = async (filePaths: string | string[]): Promise<string[]> => {
+    try {
+      const { FileDownloader } = NativeModules;
+      
+      if (!FileDownloader) {
+        console.error('❌ [downloadExportedPDFs] FileDownloader module not available');
+        throw new Error('FileDownloader module not available');
+      }
+      
+      // Handle single file or array of files
+      const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
+      const downloadedFiles: string[] = [];
+      
+      console.log(`📥 [downloadExportedPDFs] Starting download for ${paths.length} file(s)...`);
+      
+      for (const filePath of paths) {
+        if (!filePath || filePath.trim() === '') {
+          console.warn('⚠️ [downloadExportedPDFs] Skipping empty file path');
+          continue;
+        }
+
+        const fileName = filePath.split('/').pop();
+        
+        if (!fileName) {
+          console.warn('⚠️ [downloadExportedPDFs] Could not extract file name from path:', filePath);
+          continue;
+        }
+        
+        // Determine MIME type from file extension
+        const mimeType = fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 
+                        fileName.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+        
+        console.log(`📥 [downloadExportedPDFs] Downloading: ${fileName} (${mimeType})`);
+        
+        try {
+          // Use MediaStore API to save file properly
+          const publicPath = await FileDownloader.downloadToPublicFolder(
+            filePath,
+            fileName,
+            mimeType
+          );
+          
+          downloadedFiles.push(publicPath);
+          console.log(`✅ [downloadExportedPDFs] Downloaded to public storage: ${publicPath}`);
+        } catch (error: any) {
+          console.error(`❌ [downloadExportedPDFs] Failed to download ${fileName}:`, error);
+          // Continue with other files even if one fails
+        }
+      }
+      
+      console.log(`✅ [downloadExportedPDFs] All ${downloadedFiles.length} file(s) now visible in Downloads/PDFDemoApp/`);
+      return downloadedFiles;
+    } catch (error: any) {
+      console.error('❌ [downloadExportedPDFs] Download error:', error);
+      throw error;
+    }
+  };
+
+  /**
+   * Share exported files with enhanced batch handling
+   * @param {string[]} files - Array of file paths to share
+   */
+  const shareExportedFiles = async (files: string[]) => {
+    try {
+      if (files.length === 0) {
+        Alert.alert('No Files', 'No files available to share');
+        return;
+      }
+
+      if (files.length === 1) {
+        // Share single file directly
+        console.log('📤 [shareExportedFiles] Sharing single file:', files[0]);
+        await Share.share({
+          title: 'Exported PDF',
+          message: 'Check out this exported file',
+          url: `file://${files[0]}`
+        });
+      } else {
+        // For multiple files, ask user how they want to share
+        Alert.alert(
+          '📤 Share Files',
+          `You have ${files.length} files. How would you like to share them?`,
+          [
+            {text: 'Cancel', style: 'cancel'},
+            {
+              text: `Share All (${files.length})`,
+              onPress: async () => {
+                console.log(`📤 [shareExportedFiles] Sharing ${files.length} files sequentially...`);
+                for (let i = 0; i < files.length; i++) {
+                  try {
+                    await Share.share({
+                      title: `Exported File ${i + 1}/${files.length}`,
+                      message: `File ${i + 1} of ${files.length}`,
+                      url: `file://${files[i]}`
+                    });
+                    // Small delay between shares
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                  } catch (shareError) {
+                    console.log(`⚠️ [shareExportedFiles] User cancelled share for file ${i + 1}`);
+                    break; // Stop if user cancels
+                  }
+                }
+                console.log('✅ [shareExportedFiles] Share sequence completed');
+              }
+            }
+          ]
+        );
+      }
+    } catch (error: any) {
+      console.error('❌ [shareExportedFiles] Share error:', error);
+      Alert.alert('Share Failed', 'Could not share files');
+    }
   };
 
   // ============================================
@@ -541,13 +802,20 @@ function App() {
       });
       setShowLoadingOverlay(true);
 
+      let result: any;
+      
       if (options.type === 'single') {
         // Export single page
         const pageNumber = options.page || currentPage;
+        // Validate page number
+        if (pageNumber < 1 || pageNumber > totalPages) {
+          throw new Error(`Invalid page number: ${pageNumber}. Must be between 1 and ${totalPages}`);
+        }
         console.log('📤 [App] Exporting single page:', pageNumber);
+        // ExportManager expects 1-indexed page number and converts internally
         const imagePath = await exportManager.exportPageToImage(
           pdfFilePath,
-          pageNumber - 1, // Convert to 0-indexed
+          pageNumber, // Pass 1-indexed - ExportManager handles conversion
           {
             format: options.format || 'jpeg',
             quality: options.quality || 0.9,
@@ -555,8 +823,43 @@ function App() {
           },
         );
         console.log('✅ [App] Page exported successfully:', imagePath);
-        showToast(`Page exported: ${imagePath}`);
-        await Share.share({ url: `file://${imagePath}` });
+        
+        // Download to public folder
+        const downloadedFiles = await downloadExportedPDFs(imagePath);
+        console.log('✅ [App] Image downloaded to Downloads/PDFDemoApp/', downloadedFiles);
+        
+        result = {
+          exportedFiles: [imagePath],
+          downloadedFiles: downloadedFiles,
+          message: `Successfully exported page ${pageNumber}!\n\nSaved to:\nDownloads/PDFDemoApp/`
+        };
+      } else if (options.type === 'range') {
+        // Export range of pages
+        const pages = options.pages || [];
+        if (pages.length === 0) {
+          throw new Error('No pages specified for export');
+        }
+        console.log('📤 [App] Exporting pages:', pages);
+        const images = await exportManager.exportPagesToImages(
+          pdfFilePath,
+          pages,
+          {
+            format: options.format || 'jpeg',
+            quality: options.quality || 0.9,
+            scale: 2.0,
+          },
+        );
+        console.log('✅ [App] Pages exported:', images.length);
+        
+        // Download to public folder
+        const downloadedFiles = await downloadExportedPDFs(images);
+        console.log('✅ [App] Images downloaded to Downloads/PDFDemoApp/', downloadedFiles);
+        
+        result = {
+          exportedFiles: images,
+          downloadedFiles: downloadedFiles,
+          message: `Successfully exported ${images.length} page(s)!\n\nSaved to:\nDownloads/PDFDemoApp/`
+        };
       } else if (options.type === 'all') {
         // Export all pages
         console.log('📤 [App] Exporting all pages...');
@@ -566,29 +869,106 @@ function App() {
           scale: 2.0,
         });
         console.log('✅ [App] All pages exported:', images.length);
-        showToast(`Exported ${images.length} pages`);
+        
+        // Download to public folder
+        const downloadedFiles = await downloadExportedPDFs(images);
+        console.log('✅ [App] Images downloaded to Downloads/PDFDemoApp/', downloadedFiles);
+        
+        result = {
+          exportedFiles: images,
+          downloadedFiles: downloadedFiles,
+          message: `Successfully exported all ${images.length} pages!\n\nSaved to:\nDownloads/PDFDemoApp/`
+        };
       } else if (options.type === 'text') {
         // Export to text
         if (options.page) {
-          console.log('📤 [App] Exporting page to text:', options.page);
+          const pageNumber = options.page;
+          // Validate page number
+          if (pageNumber < 1 || pageNumber > totalPages) {
+            throw new Error(`Invalid page number: ${pageNumber}. Must be between 1 and ${totalPages}`);
+          }
+          console.log('📤 [App] Exporting page to text:', pageNumber);
+          // ExportManager expects 1-indexed page number and converts internally
           const text = await exportManager.exportPageToText(
             pdfFilePath,
-            options.page - 1, // Convert to 0-indexed
+            pageNumber, // Pass 1-indexed - ExportManager handles conversion
           );
           console.log('✅ [App] Text exported, length:', text.length);
-          showToast(`Text exported (${text.length} chars)`);
-          await Share.share({ message: text });
+          result = {
+            exportedFiles: [],
+            downloadedFiles: [],
+            message: `Text exported (${text.length} characters)`,
+            text: text,
+          };
         } else {
           console.log('📤 [App] Exporting all pages to text...');
           const allText = await exportManager.exportAllToText(pdfFilePath);
           console.log('✅ [App] All text exported, length:', allText.length);
-          showToast(`All text exported`);
-          await Share.share({ message: allText });
+          result = {
+            exportedFiles: [],
+            downloadedFiles: [],
+            message: `All text exported (${allText.length} characters)`,
+            text: allText,
+          };
         }
+      } else {
+        throw new Error(`Unknown export type: ${options.type}`);
+      }
+
+      if (!result) {
+        throw new Error('Export failed - no result returned');
       }
 
       setShowLoadingOverlay(false);
+      
+      // Show success alert with options
+      if (result.downloadedFiles && result.downloadedFiles.length > 0) {
+        // Show alert with Open Folder and Share options for image/PDF exports
+        const { FileManager } = NativeModules;
+        Alert.alert(
+          '✅ Export Successful',
+          result.message || 'Export completed successfully!',
+          [
+            {text: 'Done', style: 'cancel'},
+            {
+              text: 'Open Folder',
+              onPress: async () => {
+                try {
+                  if (FileManager) {
+                    await FileManager.openDownloadsFolder();
+                  }
+                } catch (e) {
+                  Alert.alert('Info', 'Please check Downloads/PDFDemoApp folder in your file manager');
+                }
+              }
+            },
+            result.downloadedFiles.length > 0 && {
+              text: 'Share',
+              onPress: () => shareExportedFiles(result.downloadedFiles),
+            },
+          ].filter(Boolean)
+        );
+      } else if (result.text) {
+        // For text exports, show share option
+        Alert.alert(
+          '✅ Export Successful',
+          result.message || 'Text exported successfully!',
+          [
+            {text: 'Done', style: 'cancel'},
+            {
+              text: 'Share',
+              onPress: async () => {
+                await Share.share({ message: result.text });
+              }
+            }
+          ]
+        );
+      } else {
+        showToast(result.message || 'Export completed successfully');
+      }
+      
       console.log('✅ [App] Export completed successfully');
+      return result;
     } catch (error: any) {
       console.error('❌ [App] Export failed:', error);
       console.error('❌ [App] Error details:', {
@@ -637,27 +1017,51 @@ function App() {
       
       switch (operation) {
         case 'split':
-          // Split PDF at current page
-          console.log('⚙️ [App] Splitting PDF at page:', currentPage);
-          const splitPath = await exportManager.splitPDF(pdfFilePath, [
-            { start: 1, end: currentPage },
-            { start: currentPage + 1, end: totalPages },
-          ]);
-          console.log('✅ [App] PDF split successfully:', splitPath);
-          result = { message: `PDF split into ${splitPath.length} files` };
-          showToast(result.message);
+          // Split PDF - use provided ranges or default to current page split
+          // splitPDF expects flat array: [start1, end1, start2, end2, ...]
+          let ranges: number[];
+          if (options?.ranges && Array.isArray(options.ranges)) {
+            // Use provided flat array directly
+            ranges = options.ranges;
+          } else {
+            // Default: split at current page (flat array format)
+            ranges = [
+              1, currentPage,
+              currentPage + 1, totalPages,
+            ];
+          }
+          console.log('⚙️ [App] Splitting PDF with ranges:', ranges);
+          const splitPaths = await exportManager.splitPDF(pdfFilePath, ranges);
+          console.log('✅ [App] PDF split successfully:', splitPaths);
+          
+          // Download split PDFs to Downloads folder
+          const downloadedSplitFiles = await downloadExportedPDFs(splitPaths);
+          const fileCount = Array.isArray(splitPaths) ? splitPaths.length : 0;
+          
+          result = {
+            message: `PDF split into ${fileCount} parts\n\n📥 Files saved to:\nDownloads/PDFDemoApp/\n\n${downloadedSplitFiles.map((f: string) => f.split('/').pop()).join('\n')}`,
+            files: downloadedSplitFiles,
+          };
           break;
 
         case 'extract':
-          // Extract current page
-          console.log('⚙️ [App] Extracting page:', currentPage);
+          // Extract pages (use provided pages or current page)
+          const pagesToExtract = options?.pages || [currentPage];
+          console.log('⚙️ [App] Extracting pages:', pagesToExtract);
           const extractPath = await exportManager.extractPages(
             pdfFilePath,
-            [currentPage],
+            pagesToExtract,
           );
-          console.log('✅ [App] Page extracted successfully:', extractPath);
-          result = { message: `Page extracted: ${extractPath}` };
-          showToast(result.message);
+          console.log('✅ [App] Pages extracted successfully:', extractPath);
+          
+          // Download extracted PDF to Downloads folder
+          const downloadedExtractFiles = await downloadExportedPDFs(extractPath);
+          const fileName = downloadedExtractFiles[0]?.split('/').pop();
+          
+          result = {
+            message: `Extracted ${pagesToExtract.length} page(s)\n\n📥 File saved to:\nDownloads/PDFDemoApp/\n\n${fileName}`,
+            files: downloadedExtractFiles,
+          };
           break;
 
         case 'rotate':
@@ -687,6 +1091,9 @@ function App() {
       }
       
       setShowLoadingOverlay(false);
+      
+      // OperationsMenu component will handle showing success alert
+      // Just return the result with message and files
       console.log('✅ [App] PDF operation completed:', result);
       return result;
     } catch (error: any) {
@@ -812,33 +1219,64 @@ function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+      <StatusBar barStyle="light-content" />
       <SafeAreaView style={styles.container} edges={['top']}>
         {/* Toolbar */}
         {Toolbar && (
           <Toolbar
-            title="PDF Features Demo"
-            subtitle={`Page ${currentPage}/${totalPages} ${jsiAvailable ? '⚡ JSI' : ''}`}
+            title="PDF Pro Viewer"
+            subtitle={`Page ${currentPage}/${totalPages}${totalPages > 0 ? ` • ${jsiAvailable ? '⚡ JSI' : 'Standard'}` : ''}`}
             buttons={[
               {
+                icon: '🔖',
+                label: 'Add Bookmark',
+                onPress: () => {
+                  if (!pdfIdentifier && !pdfFilePath) {
+                    showToast('Please wait for PDF to load');
+                    return;
+                  }
+                  setShowBookmarkModal(true);
+                },
+                badge: currentBookmark ? 1 : undefined,
+              },
+              {
                 icon: '📚',
-                label: 'Bookmarks',
-                onPress: () => setShowBookmarkList(true),
+                label: 'All Bookmarks',
+                onPress: async () => {
+                  await loadBookmarks(); // Refresh bookmarks before showing
+                  setShowBookmarkList(true);
+                },
+                badge: bookmarks.length > 0 ? bookmarks.length : undefined,
               },
               {
-                icon: '📤',
+                icon: '🖼️',
                 label: 'Export',
-                onPress: () => setShowExportMenu(true),
+                onPress: () => {
+                  if (!pdfFilePath) {
+                    showToast('Please wait for PDF to load');
+                  } else {
+                    setShowExportMenu(true);
+                  }
+                },
               },
               {
-                icon: '⚙️',
+                icon: '✂️',
                 label: 'Operations',
-                onPress: () => setShowOperationsMenu(true),
+                onPress: () => {
+                  if (!pdfFilePath) {
+                    showToast('Please wait for PDF to load');
+                  } else {
+                    setShowOperationsMenu(true);
+                  }
+                },
               },
               {
                 icon: '📊',
                 label: 'Analytics',
-                onPress: () => setShowAnalyticsPanel(true),
+                onPress: async () => {
+                  await loadAnalytics();
+                  setShowAnalyticsPanel(true);
+                },
               },
             ]}
           />
@@ -862,109 +1300,22 @@ function App() {
             spacing={10}
             fitPolicy={0}
           />
-        </View>
-
-        {/* Feature Buttons */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.buttonsContainer}
-          contentContainerStyle={styles.buttonsContent}>
-          {/* Bookmark Features */}
-          <TouchableOpacity
-            style={styles.featureButton}
-            onPress={() => {
-              console.log('🔖 [App] Add Bookmark button pressed');
-              console.log('🔖 [App] Current page:', currentPage);
-              console.log('🔖 [App] PDF file path:', pdfFilePath);
-              console.log('🔖 [App] PDF identifier:', pdfIdentifier);
-              console.log('🔖 [App] BookmarkManager available:', !!bookmarkManager);
-              
-              const pdfId = pdfIdentifier || pdfFilePath;
-              console.log('🔖 [App] Using PDF ID:', pdfId);
-              
-              if (!pdfId || pdfId.trim() === '') {
-                console.warn('⚠️ [App] Cannot open bookmark modal - PDF not loaded');
-                showToast('Please wait for PDF to load completely');
-                return;
-              }
-              
-              if (!bookmarkManager) {
-                console.warn('⚠️ [App] Cannot open bookmark modal - BookmarkManager not ready');
-                showToast('Bookmark manager not ready. Please wait...');
-                return;
-              }
-              
-              setShowBookmarkModal(true);
-            }}>
-            <Text style={styles.featureIcon}>🔖</Text>
-            <Text style={styles.featureLabel}>Add Bookmark</Text>
-          </TouchableOpacity>
-
-          {/* Export Features */}
-          <TouchableOpacity
-            style={styles.featureButton}
-            onPress={() => handleExport({ type: 'single', page: currentPage })}>
-            <Text style={styles.featureIcon}>🖼️</Text>
-            <Text style={styles.featureLabel}>Export Page</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.featureButton}
-            onPress={() => handleExport({ type: 'all' })}>
-            <Text style={styles.featureIcon}>📸</Text>
-            <Text style={styles.featureLabel}>Export All</Text>
-          </TouchableOpacity>
-
-          {/* PDF Operations */}
-          <TouchableOpacity
-            style={styles.featureButton}
-            onPress={() => handlePDFOperation('extract')}>
-            <Text style={styles.featureIcon}>✂️</Text>
-            <Text style={styles.featureLabel}>Extract Page</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.featureButton}
-            onPress={() => handlePDFOperation('rotate')}>
-            <Text style={styles.featureIcon}>🔄</Text>
-            <Text style={styles.featureLabel}>Rotate</Text>
-          </TouchableOpacity>
-
-          {/* File Management (Android) */}
-          {Platform.OS === 'android' && (
-            <>
-              <TouchableOpacity
-                style={styles.featureButton}
-                onPress={handleDownloadPDF}>
-                <Text style={styles.featureIcon}>💾</Text>
-                <Text style={styles.featureLabel}>Download</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.featureButton}
-                onPress={handleOpenDownloadsFolder}>
-                <Text style={styles.featureIcon}>📁</Text>
-                <Text style={styles.featureLabel}>Open Folder</Text>
-              </TouchableOpacity>
-            </>
+          
+          {/* Bookmark Indicator - Floating button */}
+          {BookmarkIndicator && (
+            <View style={styles.indicatorContainer}>
+              <BookmarkIndicator
+                hasBookmark={currentBookmark !== null}
+                bookmarkColor={currentBookmark?.color}
+                bookmarkCount={bookmarks.length}
+                onPress={async () => {
+                  await loadBookmarks(); // Refresh bookmarks
+                  setShowBookmarkList(true); // Open list modal
+                }}
+              />
+            </View>
           )}
-
-          {/* JSI Status */}
-          <TouchableOpacity
-            style={[
-              styles.featureButton,
-              jsiAvailable && styles.featureButtonActive,
-            ]}
-            onPress={() => showToast(jsiAvailable ? 'JSI Active' : 'JSI Inactive')}>
-            <Text style={styles.featureIcon}>
-              {jsiAvailable ? '⚡' : '🔌'}
-            </Text>
-            <Text style={styles.featureLabel}>
-              {jsiAvailable ? 'JSI On' : 'JSI Off'}
-            </Text>
-          </TouchableOpacity>
-        </ScrollView>
+        </View>
 
         {/* Modals and Overlays */}
         {BookmarkModal && (
@@ -998,6 +1349,7 @@ function App() {
             totalPages={totalPages}
             pdfPath={pdfFilePath}
             onExport={handleExport}
+            onShareFiles={shareExportedFiles}
           />
         )}
 
@@ -1047,47 +1399,24 @@ function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F5F5F5',
   },
   pdfContainer: {
     flex: 1,
     backgroundColor: '#f0f0f0',
   },
+  indicatorContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 16,
+    right: 16,
+    zIndex: 10,
+    alignItems: 'center',
+  },
   pdf: {
     flex: 1,
     width: '100%',
     height: '100%',
-  },
-  buttonsContainer: {
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    paddingVertical: 8,
-  },
-  buttonsContent: {
-    paddingHorizontal: 8,
-  },
-  featureButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: '#f5f5f5',
-    minWidth: 80,
-  },
-  featureButtonActive: {
-    backgroundColor: '#e3f2fd',
-  },
-  featureIcon: {
-    fontSize: 24,
-    marginBottom: 4,
-  },
-  featureLabel: {
-    fontSize: 12,
-    color: '#333',
-    textAlign: 'center',
   },
 });
 
