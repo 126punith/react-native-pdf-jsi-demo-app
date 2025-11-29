@@ -34,7 +34,7 @@
     "react-native": "0.82.1",
     "react-native-blob-util": ">=0.13.7",
     "react-native-nitro-modules": "*",
-    "react-native-pdf-jsi": "3.0.1",
+    "react-native-pdf-jsi": "3.4.0",
     "react-native-safe-area-context": "^5.5.2"
   },
   "devDependencies": {
