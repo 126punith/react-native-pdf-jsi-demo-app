@@ -28,4 +28,11 @@ gradle.afterProject { project ->
             task.duplicatesStrategy = DuplicatesStrategy.INCLUDE
         }
     }
+    // Nitro's prefab include dir is created by prepareHeaders. CMake rejects the
+    // imported target if that directory does not exist yet.
+    project.tasks.configureEach { task ->
+        if (task.name.contains("configureCMake") || task.name.contains("buildCMake")) {
+            task.dependsOn(":react-native-nitro-modules:prepareHeaders")
+        }
+    }
 }

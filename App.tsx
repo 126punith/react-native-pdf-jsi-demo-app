@@ -98,6 +98,7 @@ let analyticsManager: any;
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
   const pdfRef = useRef<any>(null);
+  const speedProbePath = useRef<string>('');
 
   // PDF State
   const [pdfFilePath, setPdfFilePath] = useState<string>('');
@@ -244,6 +245,60 @@ function App() {
     }
   }, [showBookmarkModal, currentPage, pdfFilePath]);
 
+  const runSpeedProbe = async (filePath: string, pageCount: number) => {
+    if (!PDFJSI || !filePath || speedProbePath.current === filePath) {
+      return;
+    }
+    speedProbePath.current = filePath;
+    const endPage = Math.max(1, pageCount || 1);
+    const timed = async (name: string, fn: () => Promise<any>) => {
+      const started = performance.now();
+      try {
+        const value = await fn();
+        const ms = performance.now() - started;
+        console.log(`[PERF] ${name} ${ms.toFixed(2)}ms`, value);
+        return value;
+      } catch (error: any) {
+        const ms = performance.now() - started;
+        console.log(`[PERF] ${name} failed ${ms.toFixed(2)}ms`, error?.message || error);
+        return null;
+      }
+    };
+
+    console.log('[PERF] speed probe start', { pdfId: filePath, pages: endPage });
+    try {
+      if (typeof PDFJSI.initializeJSI === 'function') {
+        await PDFJSI.initializeJSI();
+      }
+      await timed('registerPathForSearch', () =>
+        PDFJSI.registerPathForSearch(filePath, filePath)
+      );
+      await timed('getPageMetrics', () => PDFJSI.getPageMetrics(filePath, 1));
+      const rendered = await timed('renderPageDirect', () =>
+        PDFJSI.renderPageDirect(filePath, 1, 1, '')
+      );
+      if (rendered) {
+        console.log('[PERF] render native', {
+          width: rendered.width,
+          height: rendered.height,
+          renderTimeMs: rendered.renderTimeMs,
+        });
+      }
+      const hits = await timed('searchTextDirect', () =>
+        PDFJSI.searchTextDirect(filePath, 'React', 1, endPage)
+      );
+      if (hits) {
+        console.log('[PERF] search hits', Array.isArray(hits) ? hits.length : hits);
+      }
+      await timed('getPerformanceMetrics', () =>
+        PDFJSI.getPerformanceMetrics(filePath)
+      );
+      console.log('[PERF] speed probe end');
+    } catch (error: any) {
+      console.log('[PERF] speed probe failed', error?.message || error);
+    }
+  };
+
   // Handle PDF Load Complete
   // onLoadComplete callback signature: (numberOfPages, path, size, tableContents)
   const handleLoadComplete = async (numberOfPages: number, filePath: string, size?: any, tableContents?: any) => {
@@ -303,6 +358,10 @@ function App() {
       if (!bookmarkManager) {
         console.warn('⚠️ [App] Skipping progress tracking - BookmarkManager not available');
       }
+    }
+
+    if (filePath && filePath.trim() !== '') {
+      await runSpeedProbe(filePath, numberOfPages);
     }
   };
 
