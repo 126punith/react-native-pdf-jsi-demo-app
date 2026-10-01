@@ -1103,6 +1103,27 @@ function App() {
           };
           break;
 
+        case 'merge': {
+          const { FileManager } = NativeModules;
+          let otherPath = options?.url;
+          if (otherPath) {
+            console.log('⚙️ [App] Merging with URL:', pdfFilePath, otherPath);
+          } else {
+            console.log('⚙️ [App] Picking a PDF to merge with:', pdfFilePath);
+            otherPath = await FileManager.pickPdf();
+            console.log('⚙️ [App] Merging PDFs:', pdfFilePath, otherPath);
+          }
+          const mergedPath = await exportManager.mergePDFs([pdfFilePath, otherPath]);
+          console.log('✅ [App] PDFs merged successfully:', mergedPath);
+          const downloadedMergeFiles = await downloadExportedPDFs(mergedPath);
+          const mergedFileName = downloadedMergeFiles[0]?.split('/').pop();
+          result = {
+            message: `Merged with the selected PDF\n\n📥 File saved to:\nDownloads/PDFDemoApp/\n\n${mergedFileName}`,
+            files: downloadedMergeFiles,
+          };
+          break;
+        }
+
         case 'extract':
           // Extract pages (use provided pages or current page)
           const pagesToExtract = options?.pages || [currentPage];
