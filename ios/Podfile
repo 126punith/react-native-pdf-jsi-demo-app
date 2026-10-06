@@ -30,5 +30,85 @@ target 'DemoApp' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # Xcode 26 builds a Swift explicit module for glog. logging.h includes
+    # another glog header inside namespace google, which that module map rejects.
+    # React Native only disables this when core is not built from source.
+    ReactNativePodsUtils.set_build_setting(
+      installer,
+      build_setting: "SWIFT_ENABLE_EXPLICIT_MODULES",
+      value: "NO"
+    )
+
+    # Resource-bundle targets keep the podspec platform (11.0 / 13.0). Xcode 26
+    # rejects anything below 15.0, and react_native_post_install only rewrites
+    # native targets.
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        deployment_target = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+        if deployment_target.nil? || deployment_target.to_f < min_ios_version_supported.to_f
+          config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = min_ios_version_supported
+        end
+        config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+        # fmt 11.0.2's consteval format strings fail on Xcode 26 when built as
+        # C++20. C++17 keeps FMT_USE_CONSTEVAL off. Other pods stay on C++20.
+        if target.name == 'fmt'
+          config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
+        end
+      end
+    end
+
+    installer.aggregate_targets.each do |aggregate_target|
+      aggregate_target.user_project.native_targets.each do |target|
+        target.build_configurations.each do |config|
+          config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
+        end
+      end
+      aggregate_target.user_project.save
+    end
+
+    Dir.glob(File.join(installer.sandbox.root, 'Target Support Files', 'fmt', '*.xcconfig')).each do |xcconfig_path|
+      contents = File.read(xcconfig_path)
+      updated = contents.gsub('CLANG_CXX_LANGUAGE_STANDARD = c++20', 'CLANG_CXX_LANGUAGE_STANDARD = c++17')
+      File.write(xcconfig_path, updated) if updated != contents
+    end
+
+    # SwiftEmitModule compiles the fmt Clang module as C++20, so the fmt
+    # target's C++17 setting does not apply. Any Apple Clang must leave
+    # consteval off; this header would otherwise redefine the macro itself.
+    fmt_base_paths = [
+      File.join(installer.sandbox.root, 'fmt', 'include', 'fmt', 'base.h'),
+      File.join(installer.sandbox.root, 'Headers', 'Public', 'fmt', 'fmt', 'base.h'),
+    ]
+    fmt_base_paths.map { |path| File.realpath(path) rescue nil }.compact.uniq.each do |base_h_path|
+      contents = File.read(base_h_path)
+      updated = contents.gsub(
+        "#elif defined(__apple_build_version__) && __apple_build_version__ < 14000029L\n#  define FMT_USE_CONSTEVAL 0  // consteval is broken in Apple clang < 14.",
+        "#elif defined(__apple_build_version__)\n#  define FMT_USE_CONSTEVAL 0  // consteval format strings fail on Xcode 26 Apple Clang."
+      )
+      next if updated == contents
+      File.chmod(0644, base_h_path)
+      File.write(base_h_path, updated)
+    end
+
+    # An umbrella header puts every glog header in one module, so an include
+    # inside namespace google is a redundant module import. Textual headers
+    # keep those includes as ordinary includes.
+    glog_modulemap = <<~MODULEMAP
+    module glog {
+      textual header "glog-umbrella.h"
+      textual header "glog/logging.h"
+      textual header "glog/log_severity.h"
+      textual header "glog/raw_logging.h"
+      textual header "glog/stl_logging.h"
+      textual header "glog/vlog_is_on.h"
+      export *
+    }
+    MODULEMAP
+    Dir.glob(File.join(installer.sandbox.root, '**', 'glog.modulemap')).each do |modulemap_path|
+      next if File.read(modulemap_path) == glog_modulemap
+      File.chmod(0644, modulemap_path)
+      File.write(modulemap_path, glog_modulemap)
+    end
   end
 end
