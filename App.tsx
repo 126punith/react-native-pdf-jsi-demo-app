@@ -106,6 +106,9 @@ function App() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [totalPages, setTotalPages] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [viewerMounted, setViewerMounted] = useState<boolean>(false);
+  const [viewerKey, setViewerKey] = useState<number>(0);
+  const [pdfSource, setPdfSource] = useState<{uri: string; cache: boolean} | null>(null);
 
   // Feature Modals State
   const [showBookmarkModal, setShowBookmarkModal] = useState<boolean>(false);
@@ -137,21 +140,68 @@ function App() {
       })
     : { isJSIAvailable: false, isInitialized: true };
 
-  // PDF source configuration
-  const pdfSource = {
-    uri: 'http://samples.leanpub.com/thereactnativebook-sample.pdf',
-    cache: true,
+  const applyLocalPdf = (path: string) => {
+    const normalized = path.startsWith('file://') ? path.replace('file://', '') : path;
+    setPdfFilePath(normalized);
+    setPdfIdentifier(normalized);
+    setPdfSource({uri: `file://${normalized}`, cache: false});
+    setCurrentPage(1);
+    setViewerKey((key) => key + 1);
+    setViewerMounted(true);
   };
 
-  // Initialize PDF identifier with source URI immediately (fallback if file path not available)
-  useEffect(() => {
-    if (pdfSource && pdfSource.uri) {
-      console.log('📁 [App] Initializing PDF identifier with source URI:', pdfSource.uri);
-      setPdfIdentifier(pdfSource.uri);
-      console.log('✅ [App] PDF identifier initialized, bookmarks can now work');
+  const chooseLocalPdf = async () => {
+    const nativeFiles = NativeModules.FileManager;
+    if (!nativeFiles?.pickLocalPdf) {
+      showToast('File picker is not available');
+      return;
     }
+    try {
+      const picked = await nativeFiles.pickLocalPdf();
+      if (picked) {
+        applyLocalPdf(picked);
+      }
+    } catch (error: any) {
+      if (error?.code !== 'PICK_CANCELLED') {
+        showToast(error?.message || 'Could not open the selected PDF');
+      }
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSavedPdf = async () => {
+      if (Platform.OS !== 'android') {
+        return;
+      }
+      const nativeFiles = NativeModules.FileManager;
+      if (!nativeFiles?.savedLocalPdf) {
+        return;
+      }
+      try {
+        const saved = await nativeFiles.savedLocalPdf();
+        if (cancelled) {
+          return;
+        }
+        if (saved) {
+          applyLocalPdf(saved);
+          return;
+        }
+        const picked = await nativeFiles.pickLocalPdf();
+        if (!cancelled && picked) {
+          applyLocalPdf(picked);
+        }
+      } catch (error) {
+        console.warn('No saved PDF selected:', error);
+      }
+    };
+    loadSavedPdf();
+    return () => {
+      cancelled = true;
+    };
+    // applyLocalPdf only writes state from the first launch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run once on mount
+  }, []);
 
   // Initialize Managers on Mount
   useEffect(() => {
@@ -243,7 +293,7 @@ function App() {
     } else {
       console.log('📚 [App] BookmarkModal closed');
     }
-  }, [showBookmarkModal, currentPage, pdfFilePath]);
+  }, [showBookmarkModal]);
 
   const runSpeedProbe = async (filePath: string, pageCount: number) => {
     if (!PDFJSI || !filePath || speedProbePath.current === filePath) {
@@ -267,12 +317,7 @@ function App() {
 
     console.log('[PERF] speed probe start', { pdfId: filePath, pages: endPage });
     try {
-      if (typeof PDFJSI.initializeJSI === 'function') {
-        await PDFJSI.initializeJSI();
-      }
-      await timed('registerPathForSearch', () =>
-        PDFJSI.registerPathForSearch(filePath, filePath)
-      );
+      await timed('openPdf', () => PDFJSI.openPdf(filePath));
       await timed('getPageMetrics', () => PDFJSI.getPageMetrics(filePath, 1));
       const rendered = await timed('renderPageDirect', () =>
         PDFJSI.renderPageDirect(filePath, 1, 1, '')
@@ -285,7 +330,7 @@ function App() {
         });
       }
       const hits = await timed('searchTextDirect', () =>
-        PDFJSI.searchTextDirect(filePath, 'React', 1, endPage)
+        PDFJSI.searchTextDirect(filePath, 'class', 1, endPage)
       );
       if (hits) {
         console.log('[PERF] search hits', Array.isArray(hits) ? hits.length : hits);
@@ -323,10 +368,14 @@ function App() {
       console.warn('⚠️ [App] Using PDF source URI as fallback identifier for bookmarks...');
       
       // Use PDF source URI as identifier if file path is not available
-      if (pdfSource && typeof pdfSource === 'object' && pdfSource.uri) {
-        console.log('📁 [App] Using PDF source URI as identifier:', pdfSource.uri);
+      const sourceUri =
+        typeof pdfSource === 'object' && pdfSource
+          ? (pdfSource as {uri?: string}).uri
+          : undefined;
+      if (sourceUri) {
+        console.log('📁 [App] Using PDF source URI as identifier:', sourceUri);
         setPdfFilePath(''); // Keep file path empty since it's not available
-        setPdfIdentifier(pdfSource.uri); // Use URI as identifier for bookmarks
+        setPdfIdentifier(sourceUri); // Use URI as identifier for bookmarks
       } else {
         console.error('❌ [App] No file path available and no source URI found');
         setPdfFilePath('');
@@ -712,22 +761,20 @@ function App() {
   };
 
   /**
-   * Download exported files to public Downloads folder
-   * @param {string | string[]} filePaths - Single file path or array of file paths
-   * @returns {Promise<string[]>} Array of downloaded file paths
+   * Download exported files to public Downloads/PDFDemoApp.
+   * `path` is the MediaStore content URI. `fileName` is the source file name
+   * shown to the user, because the URI's last segment is a numeric row id.
    */
-  const downloadExportedPDFs = async (filePaths: string | string[]): Promise<string[]> => {
+  const downloadExportedPDFs = async (filePaths: string | string[]): Promise<{path: string; fileName: string}[]> => {
     try {
-      const { FileDownloader } = NativeModules;
-      
-      if (!FileDownloader) {
-        console.error('❌ [downloadExportedPDFs] FileDownloader module not available');
-        throw new Error('FileDownloader module not available');
+      if (!FileManager?.downloadToPublicFolder) {
+        console.error('❌ [downloadExportedPDFs] FileManager is not available');
+        throw new Error('FileManager is not available');
       }
       
       // Handle single file or array of files
       const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
-      const downloadedFiles: string[] = [];
+      const downloadedFiles: {path: string; fileName: string}[] = [];
       
       console.log(`📥 [downloadExportedPDFs] Starting download for ${paths.length} file(s)...`);
       
@@ -752,13 +799,13 @@ function App() {
         
         try {
           // Use MediaStore API to save file properly
-          const publicPath = await FileDownloader.downloadToPublicFolder(
+          const publicPath = await FileManager.downloadToPublicFolder(
             filePath,
             fileName,
             mimeType
           );
           
-          downloadedFiles.push(publicPath);
+          downloadedFiles.push({path: publicPath, fileName});
           console.log(`✅ [downloadExportedPDFs] Downloaded to public storage: ${publicPath}`);
         } catch (error: any) {
           console.error(`❌ [downloadExportedPDFs] Failed to download ${fileName}:`, error);
@@ -884,7 +931,8 @@ function App() {
         console.log('✅ [App] Page exported successfully:', imagePath);
         
         // Download to public folder
-        const downloadedFiles = await downloadExportedPDFs(imagePath);
+        const savedFiles = await downloadExportedPDFs(imagePath);
+        const downloadedFiles = savedFiles.map((file) => file.path);
         console.log('✅ [App] Image downloaded to Downloads/PDFDemoApp/', downloadedFiles);
         
         result = {
@@ -911,7 +959,8 @@ function App() {
         console.log('✅ [App] Pages exported:', images.length);
         
         // Download to public folder
-        const downloadedFiles = await downloadExportedPDFs(images);
+        const savedFiles = await downloadExportedPDFs(images);
+        const downloadedFiles = savedFiles.map((file) => file.path);
         console.log('✅ [App] Images downloaded to Downloads/PDFDemoApp/', downloadedFiles);
         
         result = {
@@ -930,7 +979,8 @@ function App() {
         console.log('✅ [App] All pages exported:', images.length);
         
         // Download to public folder
-        const downloadedFiles = await downloadExportedPDFs(images);
+        const savedFiles = await downloadExportedPDFs(images);
+        const downloadedFiles = savedFiles.map((file) => file.path);
         console.log('✅ [App] Images downloaded to Downloads/PDFDemoApp/', downloadedFiles);
         
         result = {
@@ -983,7 +1033,6 @@ function App() {
       // Show success alert with options
       if (result.downloadedFiles && result.downloadedFiles.length > 0) {
         // Show alert with Open Folder and Share options for image/PDF exports
-        const { FileManager } = NativeModules;
         Alert.alert(
           '✅ Export Successful',
           result.message || 'Export completed successfully!',
@@ -1098,8 +1147,8 @@ function App() {
           const fileCount = Array.isArray(splitPaths) ? splitPaths.length : 0;
           
           result = {
-            message: `PDF split into ${fileCount} parts\n\n📥 Files saved to:\nDownloads/PDFDemoApp/\n\n${downloadedSplitFiles.map((f: string) => f.split('/').pop()).join('\n')}`,
-            files: downloadedSplitFiles,
+            message: `PDF split into ${fileCount} parts\n\n📥 Files saved to:\nDownloads/PDFDemoApp/\n\n${downloadedSplitFiles.map((file) => file.fileName).join('\n')}`,
+            files: downloadedSplitFiles.map((file) => file.path),
           };
           break;
 
@@ -1116,10 +1165,10 @@ function App() {
           const mergedPath = await exportManager.mergePDFs([pdfFilePath, otherPath]);
           console.log('✅ [App] PDFs merged successfully:', mergedPath);
           const downloadedMergeFiles = await downloadExportedPDFs(mergedPath);
-          const mergedFileName = downloadedMergeFiles[0]?.split('/').pop();
+          const mergedFileName = downloadedMergeFiles[0]?.fileName;
           result = {
             message: `Merged with the selected PDF\n\n📥 File saved to:\nDownloads/PDFDemoApp/\n\n${mergedFileName}`,
-            files: downloadedMergeFiles,
+            files: downloadedMergeFiles.map((file) => file.path),
           };
           break;
         }
@@ -1136,11 +1185,11 @@ function App() {
           
           // Download extracted PDF to Downloads folder
           const downloadedExtractFiles = await downloadExportedPDFs(extractPath);
-          const fileName = downloadedExtractFiles[0]?.split('/').pop();
+          const fileName = downloadedExtractFiles[0]?.fileName;
           
           result = {
             message: `Extracted ${pagesToExtract.length} page(s)\n\n📥 File saved to:\nDownloads/PDFDemoApp/\n\n${fileName}`,
-            files: downloadedExtractFiles,
+            files: downloadedExtractFiles.map((file) => file.path),
           };
           break;
 
@@ -1308,6 +1357,20 @@ function App() {
             subtitle={`Page ${currentPage}/${totalPages}${totalPages > 0 ? ` • ${jsiAvailable ? '⚡ JSI' : 'Standard'}` : ''}`}
             buttons={[
               {
+                icon: !pdfSource ? '📄' : viewerMounted ? '✕' : '📄',
+                label: !pdfSource ? 'Choose PDF' : viewerMounted ? 'Close viewer' : 'Show viewer',
+                onPress: () => {
+                  if (viewerMounted && pdfSource) {
+                    setViewerMounted(false);
+                  } else if (pdfSource) {
+                    setViewerKey((key) => key + 1);
+                    setViewerMounted(true);
+                  } else {
+                    chooseLocalPdf();
+                  }
+                },
+              },
+              {
                 icon: '🔖',
                 label: 'Add Bookmark',
                 onPress: () => {
@@ -1364,22 +1427,35 @@ function App() {
 
         {/* PDF Viewer */}
         <View style={styles.pdfContainer}>
-          {/* @ts-expect-error - Pdf component props may not be in type definitions */}
-          <Pdf
-            ref={pdfRef}
-            source={pdfSource}
-            style={styles.pdf}
-            page={currentPage}
-            onLoadComplete={handleLoadComplete}
-            onPageChanged={handlePageChanged}
-            onError={handleError}
-            trustAllCerts={false}
-            horizontal={false}
-            enablePaging={true}
-            enableRTL={false}
-            spacing={10}
-            fitPolicy={0}
-          />
+          {viewerMounted && pdfSource ? (
+            /* @ts-expect-error - Pdf component props may not be in type definitions */
+            <Pdf
+              key={viewerKey}
+              ref={pdfRef}
+              source={pdfSource}
+              style={styles.pdf}
+              page={currentPage}
+              onLoadComplete={handleLoadComplete}
+              onPageChanged={handlePageChanged}
+              onError={handleError}
+              trustAllCerts={false}
+              horizontal={false}
+              enablePaging={true}
+              enableRTL={false}
+              spacing={10}
+              fitPolicy={0}
+            />
+          ) : (
+            <View style={styles.chooseContainer}>
+              <Text style={styles.chooseTitle}>Choose a PDF</Text>
+              <Text style={styles.chooseBody}>
+                After storage access is allowed, pick a PDF. It is saved in the app and used for viewing and operations.
+              </Text>
+              <TouchableOpacity style={styles.chooseButton} onPress={chooseLocalPdf}>
+                <Text style={styles.chooseButtonText}>Choose PDF</Text>
+              </TouchableOpacity>
+            </View>
+          )}
           
           {/* Bookmark Indicator - Floating button */}
           {BookmarkIndicator && (
@@ -1497,6 +1573,35 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     height: '100%',
+  },
+  chooseContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  chooseTitle: {
+    fontSize: 22,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  chooseBody: {
+    fontSize: 15,
+    color: '#4B5563',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  chooseButton: {
+    backgroundColor: '#6366F1',
+    borderRadius: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  chooseButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

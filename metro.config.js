@@ -10,7 +10,11 @@ const path = require('path');
 
 // Package is now directly copied to node_modules (not symlinked)
 // This ensures normal module resolution and prevents multiple React instances
+const downloadsDir = path.resolve(__dirname, '..');
+
 const config = {
+  // App.tsx requires ../C++.pdf from the Downloads folder beside this project.
+  watchFolders: [downloadsDir],
   resolver: {
     // Ensure React, React Native, and related packages are resolved from app's node_modules
     // This prevents multiple React instances and module resolution conflicts

@@ -24,17 +24,17 @@ class MainApplication : Application(), ReactApplication {
   override fun onCreate() {
     super.onCreate()
     
-    // Initialize Nitro Modules native library (MUST be before loadReactNative)
-    // Use reflection to avoid compilation errors if library is not linked
+    // Load libNitroPdfJsi before React starts so JNI_OnLoad can register PdfLibrary.
+    // Reflection keeps this from failing to compile when the library is not linked.
     try {
-      val initClass = Class.forName("org.wonday.pdf.RNPDFJSIInit")
+      val initClass = Class.forName("com.margelo.nitro.pdfjsi.NitroPdfJsiOnLoad")
       val initMethod = initClass.getDeclaredMethod("initializeNative")
       initMethod.invoke(null)
-      Log.d("MainApplication", "Nitro Modules initialized successfully")
+      Log.d("MainApplication", "NitroPdfJsi native library initialized")
     } catch (e: ClassNotFoundException) {
-      Log.w("MainApplication", "RNPDFJSIInit not found - library may not be linked. Error: ${e.message}")
+      Log.w("MainApplication", "NitroPdfJsiOnLoad not found - library may not be linked", e)
     } catch (e: Exception) {
-      Log.e("MainApplication", "Failed to initialize Nitro Modules: ${e.message}")
+      Log.e("MainApplication", "Failed to initialize NitroPdfJsi native library", e)
     }
     
     loadReactNative(this)

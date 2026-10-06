@@ -1,39 +1,64 @@
 package org.wonday.pdf;
 
+import android.Manifest;
 import android.app.Activity;
-import android.app.DownloadManager;
+import android.content.ContentUris;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.net.Uri;
-import android.util.Log;
+import android.os.Build;
+import android.os.Environment;
+import android.os.Process;
+import android.provider.MediaStore;
+import android.provider.OpenableColumns;
+import android.provider.Settings;
+
+import androidx.core.content.ContextCompat;
 
 import com.facebook.react.bridge.ActivityEventListener;
-import com.facebook.react.bridge.Arguments;
+import com.facebook.react.bridge.LifecycleEventListener;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
-import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.modules.core.PermissionAwareActivity;
+import com.facebook.react.modules.core.PermissionListener;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
 /**
- * FileManager - Native module for file operations like opening folders
+ * Grants access to a developer-supplied local PDF, then copies content URIs
+ * into app-private storage so PDFium can open a real path.
  */
-public class FileManager extends ReactContextBaseJavaModule implements ActivityEventListener {
-    private static final String TAG = "FileManager";
-    private static final String FOLDER_NAME = "PDFDemoApp";
-    private static final int PICK_PDF_REQUEST = 47291;
+public class FileManager extends ReactContextBaseJavaModule implements ActivityEventListener, LifecycleEventListener {
+    private static final int READ_STORAGE_REQUEST = 47291;
+    private static final int ALL_FILES_REQUEST = 47292;
+    private static final int PICK_PDF_REQUEST = 47293;
+    private static final String PREFS = "pdf_file_access";
+    private static final String KEY_RESTART = "all_files_restarted";
+    private static final String KEY_SAVED_PDF = "saved_pdf_path";
+
     private final ReactApplicationContext reactContext;
-    private Promise pickPromise;
+    private Promise pendingPromise;
+    private String pendingPath;
+    private boolean leftForSettings;
+    private boolean pickAfterSettings;
+    private boolean awaitingDocumentPick;
+    private boolean rememberPickedPdf;
 
     public FileManager(ReactApplicationContext reactContext) {
         super(reactContext);
         this.reactContext = reactContext;
         reactContext.addActivityEventListener(this);
+        reactContext.addLifecycleEventListener(this);
     }
 
     @Override
@@ -41,235 +66,308 @@ public class FileManager extends ReactContextBaseJavaModule implements ActivityE
         return "FileManager";
     }
 
-    /**
-     * Open the Downloads/PDFDemoApp folder in the file manager
-     * Multiple fallback strategies for maximum compatibility
-     */
     @ReactMethod
-    public void openDownloadsFolder(Promise promise) {
-        try {
-            Log.i(TAG, "📂 [OPEN FOLDER] Attempting to open Downloads/" + FOLDER_NAME);
-            
-            // Strategy 1: Try to open specific Downloads/PDFDemoApp folder
-            try {
-                Intent specificIntent = new Intent(Intent.ACTION_VIEW);
-                Uri folderUri = Uri.parse("content://com.android.externalstorage.documents/document/primary:Download/" + FOLDER_NAME);
-                specificIntent.setDataAndType(folderUri, "resource/folder");
-                specificIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                
-                if (specificIntent.resolveActivity(reactContext.getPackageManager()) != null) {
-                    reactContext.startActivity(specificIntent);
-                    Log.i(TAG, "✅ [OPEN FOLDER] Opened specific folder via DocumentsUI");
-                    promise.resolve(true);
-                    return;
-                }
-            } catch (Exception e) {
-                Log.i(TAG, "📂 [OPEN FOLDER] Strategy 1 failed, trying fallback...");
-            }
-            
-            // Strategy 2: Open Downloads app
-            try {
-                Log.i(TAG, "📂 [OPEN FOLDER] Trying Downloads app");
-                Intent downloadsIntent = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
-                downloadsIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                
-                if (downloadsIntent.resolveActivity(reactContext.getPackageManager()) != null) {
-                    reactContext.startActivity(downloadsIntent);
-                    Log.i(TAG, "✅ [OPEN FOLDER] Opened Downloads app");
-                    promise.resolve(true);
-                    return;
-                }
-            } catch (Exception e) {
-                Log.i(TAG, "📂 [OPEN FOLDER] Strategy 2 failed, trying fallback...");
-            }
-            
-            // Strategy 3: Open Files app with generic CATEGORY_APP_FILES intent
-            try {
-                Log.i(TAG, "📂 [OPEN FOLDER] Trying Files app");
-                Intent filesIntent = new Intent(Intent.ACTION_VIEW);
-                filesIntent.addCategory(Intent.CATEGORY_DEFAULT);
-                filesIntent.setType("resource/folder");
-                filesIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                
-                if (filesIntent.resolveActivity(reactContext.getPackageManager()) != null) {
-                    reactContext.startActivity(filesIntent);
-                    Log.i(TAG, "✅ [OPEN FOLDER] Opened Files app");
-                    promise.resolve(true);
-                    return;
-                }
-            } catch (Exception e) {
-                Log.i(TAG, "📂 [OPEN FOLDER] Strategy 3 failed");
-            }
-            
-            // Strategy 4: Try to launch any file manager using generic intent
-            try {
-                Log.i(TAG, "📂 [OPEN FOLDER] Trying generic file manager");
-                Intent genericIntent = new Intent(Intent.ACTION_GET_CONTENT);
-                genericIntent.setType("*/*");
-                genericIntent.addCategory(Intent.CATEGORY_OPENABLE);
-                genericIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                
-                if (genericIntent.resolveActivity(reactContext.getPackageManager()) != null) {
-                    reactContext.startActivity(Intent.createChooser(genericIntent, "Open File Manager"));
-                    Log.i(TAG, "✅ [OPEN FOLDER] Opened file picker");
-                    promise.resolve(true);
-                    return;
-                }
-            } catch (Exception e) {
-                Log.i(TAG, "📂 [OPEN FOLDER] Strategy 4 failed");
-            }
-            
-            // All strategies failed
-            Log.w(TAG, "⚠️ [OPEN FOLDER] All strategies failed - no file manager available");
-            promise.reject("NO_FILE_MANAGER", "No file manager app available on this device");
-            
-        } catch (Exception e) {
-            Log.e(TAG, "❌ [OPEN FOLDER] ERROR", e);
-            promise.reject("OPEN_FOLDER_ERROR", e.getMessage());
+    public void ensureLocalFileAccess(String path, Promise promise) {
+        if (isAppPrivate(path)) {
+            promise.resolve(normalizePath(path));
+            return;
         }
-    }
-
-    /**
-     * Check if a file exists at the given path
-     */
-    @ReactMethod
-    public void fileExists(String filePath, Promise promise) {
-        long startTime = System.currentTimeMillis();
-        try {
-            Log.i(TAG, "[PERF] [fileExists] 🔵 ENTER - path: " + filePath);
-            
-            long validationStart = System.currentTimeMillis();
-            if (filePath == null || filePath.trim().isEmpty()) {
-                Log.e(TAG, "[PERF] [fileExists] ❌ Invalid path (empty)");
-                promise.reject("INVALID_PATH", "File path cannot be empty");
+        if (pendingPromise != null) {
+            promise.reject("PERMISSION_IN_PROGRESS", "A storage permission request is already open");
+            return;
+        }
+        if (hasAllFilesAccess() || hasLegacyReadAccess()) {
+            resolveWithCopy(promise, path, false);
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Activity activity = reactContext.getCurrentActivity();
+            if (activity == null) {
+                promise.reject("NO_ACTIVITY", "No current activity to request All files access");
                 return;
             }
-            long validationTime = System.currentTimeMillis() - validationStart;
-            Log.i(TAG, "[PERF] [fileExists]   Validation: " + validationTime + "ms");
-            
-            long fileAccessStart = System.currentTimeMillis();
-            File file = new File(filePath);
-            boolean exists = file.exists();
-            long fileAccessTime = System.currentTimeMillis() - fileAccessStart;
-            
-            long totalTime = System.currentTimeMillis() - startTime;
-            
-            Log.i(TAG, "[PERF] [fileExists]   File Access: " + fileAccessTime + "ms");
-            Log.i(TAG, "[PERF] [fileExists]   Result: " + exists);
-            Log.i(TAG, "[PERF] [fileExists] 🔴 EXIT - Total: " + totalTime + "ms");
-            
-            promise.resolve(exists);
-        } catch (Exception e) {
-            long totalTime = System.currentTimeMillis() - startTime;
-            Log.e(TAG, "[PERF] [fileExists] ❌ ERROR after " + totalTime + "ms", e);
-            promise.reject("FILE_EXISTS_ERROR", e.getMessage());
-        }
-    }
-
-    /**
-     * Get file size and metadata
-     */
-    @ReactMethod
-    public void getFileSize(String filePath, Promise promise) {
-        long startTime = System.currentTimeMillis();
-        try {
-            Log.i(TAG, "[PERF] [getFileSize] 🔵 ENTER");
-            Log.i(TAG, "[PERF] [getFileSize]   Path: " + filePath);
-            Log.i(TAG, "[PERF] [getFileSize]   Path length: " + (filePath != null ? filePath.length() : 0));
-            
-            long fileCreateStart = System.currentTimeMillis();
-            File file = new File(filePath);
-            long fileCreateTime = System.currentTimeMillis() - fileCreateStart;
-            Log.i(TAG, "[PERF] [getFileSize]   File object creation: " + fileCreateTime + "ms");
-            
-            long existsCheckStart = System.currentTimeMillis();
-            boolean exists = file.exists();
-            long existsCheckTime = System.currentTimeMillis() - existsCheckStart;
-            Log.i(TAG, "[PERF] [getFileSize]   Exists check: " + existsCheckTime + "ms, result: " + exists);
-            
-            if (!exists) {
-                long totalTime = System.currentTimeMillis() - startTime;
-                Log.w(TAG, "[PERF] [getFileSize] ⚠️ File not found after " + totalTime + "ms");
-                promise.reject("FILE_NOT_FOUND", "File does not exist: " + filePath);
-                return;
+            pendingPromise = promise;
+            pendingPath = path;
+            leftForSettings = false;
+            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            intent.setData(Uri.parse("package:" + reactContext.getPackageName()));
+            try {
+                activity.startActivityForResult(intent, ALL_FILES_REQUEST);
+            } catch (Exception primary) {
+                try {
+                    activity.startActivityForResult(
+                        new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
+                        ALL_FILES_REQUEST);
+                } catch (Exception fallback) {
+                    pendingPromise = null;
+                    pendingPath = null;
+                    promise.reject("PERMISSION_FAILED", fallback.getMessage(), fallback);
+                }
             }
-            
-            long sizeCheckStart = System.currentTimeMillis();
-            long sizeBytes = file.length();
-            long sizeCheckTime = System.currentTimeMillis() - sizeCheckStart;
-            double sizeMB = sizeBytes / (1024.0 * 1024.0);
-            Log.i(TAG, "[PERF] [getFileSize]   Size retrieval: " + sizeCheckTime + "ms");
-            Log.i(TAG, "[PERF] [getFileSize]   Size: " + sizeBytes + " bytes (" + String.format("%.2f", sizeMB) + " MB)");
-            
-            long resultBuildStart = System.currentTimeMillis();
-            WritableMap result = Arguments.createMap();
-            result.putString("size", String.valueOf(sizeBytes));
-            result.putDouble("sizeMB", sizeMB);
-            result.putString("path", filePath);
-            result.putBoolean("exists", true);
-            long resultBuildTime = System.currentTimeMillis() - resultBuildStart;
-            Log.i(TAG, "[PERF] [getFileSize]   Result build: " + resultBuildTime + "ms");
-            
-            long totalTime = System.currentTimeMillis() - startTime;
-            Log.i(TAG, "[PERF] [getFileSize] 🔴 EXIT - Total: " + totalTime + "ms");
-            Log.i(TAG, "[PERF] [getFileSize]   Breakdown: create=" + fileCreateTime + "ms, exists=" + existsCheckTime + "ms, size=" + sizeCheckTime + "ms, build=" + resultBuildTime + "ms");
-            
-            promise.resolve(result);
-        } catch (Exception e) {
-            long totalTime = System.currentTimeMillis() - startTime;
-            Log.e(TAG, "[PERF] [getFileSize] ❌ ERROR after " + totalTime + "ms", e);
-            Log.e(TAG, "[PERF] [getFileSize]   Exception type: " + e.getClass().getName());
-            Log.e(TAG, "[PERF] [getFileSize]   Message: " + e.getMessage());
-            promise.reject("FILE_SIZE_ERROR", e.getMessage());
+            return;
+        }
+
+        Activity activity = reactContext.getCurrentActivity();
+        if (!(activity instanceof PermissionAwareActivity)) {
+            promise.reject("NO_ACTIVITY", "No current activity to request storage access");
+            return;
+        }
+        pendingPromise = promise;
+        pendingPath = path;
+        PermissionAwareActivity permissionActivity = (PermissionAwareActivity) activity;
+        permissionActivity.requestPermissions(
+            new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
+            READ_STORAGE_REQUEST,
+            new PermissionListener() {
+                @Override
+                public boolean onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+                    if (requestCode != READ_STORAGE_REQUEST) {
+                        return false;
+                    }
+                    boolean granted = grantResults.length > 0
+                        && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+                    finishPending(granted, false);
+                    return true;
+                }
+            });
+    }
+
+    @ReactMethod
+    public void copyContentUriToFile(String uriString, Promise promise) {
+        try {
+            Uri uri = Uri.parse(uriString);
+            File dest = new File(reactContext.getFilesDir(), "content-" + System.currentTimeMillis() + ".pdf");
+            try (InputStream in = reactContext.getContentResolver().openInputStream(uri);
+                 OutputStream out = new FileOutputStream(dest)) {
+                if (in == null) {
+                    promise.reject("CONTENT_COPY_FAILED", "Unable to open " + uriString);
+                    return;
+                }
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, read);
+                }
+            }
+            promise.resolve(dest.getAbsolutePath());
+        } catch (Exception error) {
+            promise.reject("CONTENT_COPY_FAILED", error.getMessage(), error);
         }
     }
 
-    /**
-     * Open the system picker and copy the chosen PDF into app files.
-     */
+    @ReactMethod
+    public void savedLocalPdf(Promise promise) {
+        String saved = prefs().getString(KEY_SAVED_PDF, null);
+        if (saved != null && new File(saved).isFile()) {
+            promise.resolve(saved);
+            return;
+        }
+        promise.resolve(null);
+    }
+
+    @ReactMethod
+    public void pickLocalPdf(Promise promise) {
+        startPdfPick(promise, true);
+    }
+
     @ReactMethod
     public void pickPdf(Promise promise) {
+        startPdfPick(promise, false);
+    }
+
+    private void startPdfPick(Promise promise, boolean remember) {
+        if (pendingPromise != null) {
+            promise.reject("PERMISSION_IN_PROGRESS", "A storage permission request is already open");
+            return;
+        }
+        pendingPromise = promise;
+        pendingPath = null;
+        rememberPickedPdf = remember;
+        pickAfterSettings = false;
+        awaitingDocumentPick = false;
+        if (hasAllFilesAccess() || hasLegacyReadAccess()) {
+            openPdfPicker();
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            pickAfterSettings = true;
+            Activity activity = reactContext.getCurrentActivity();
+            if (activity == null) {
+                clearPickRequest();
+                promise.reject("NO_ACTIVITY", "No current activity to request All files access");
+                return;
+            }
+            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            intent.setData(Uri.parse("package:" + reactContext.getPackageName()));
+            try {
+                activity.startActivityForResult(intent, ALL_FILES_REQUEST);
+            } catch (Exception primary) {
+                try {
+                    activity.startActivityForResult(
+                        new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
+                        ALL_FILES_REQUEST);
+                } catch (Exception fallback) {
+                    clearPickRequest();
+                    promise.reject("PERMISSION_FAILED", fallback.getMessage(), fallback);
+                }
+            }
+            return;
+        }
         Activity activity = reactContext.getCurrentActivity();
-        if (activity == null) {
-            promise.reject("NO_ACTIVITY", "No current activity");
+        if (!(activity instanceof PermissionAwareActivity)) {
+            clearPickRequest();
+            promise.reject("NO_ACTIVITY", "No current activity to request storage access");
             return;
         }
-        if (pickPromise != null) {
-            promise.reject("PICK_IN_PROGRESS", "A PDF picker is already open");
+        PermissionAwareActivity permissionActivity = (PermissionAwareActivity) activity;
+        permissionActivity.requestPermissions(
+            new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
+            READ_STORAGE_REQUEST,
+            new PermissionListener() {
+                @Override
+                public boolean onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+                    if (requestCode != READ_STORAGE_REQUEST || pendingPromise == null) {
+                        return false;
+                    }
+                    boolean granted = grantResults.length > 0
+                        && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+                    if (granted) {
+                        openPdfPicker();
+                    } else {
+                        Promise denied = pendingPromise;
+                        clearPickRequest();
+                        denied.reject("PERMISSION_DENIED", "Storage access is required to open this PDF");
+                    }
+                    return true;
+                }
+            });
+    }
+
+    private void openPdfPicker() {
+        Activity activity = reactContext.getCurrentActivity();
+        if (activity == null || pendingPromise == null) {
+            Promise promise = pendingPromise;
+            clearPickRequest();
+            if (promise != null) {
+                promise.reject("NO_ACTIVITY", "No current activity to choose a PDF");
+            }
             return;
         }
-        pickPromise = promise;
+        awaitingDocumentPick = true;
+        pickAfterSettings = false;
+        leftForSettings = false;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/pdf");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         try {
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("application/pdf");
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             activity.startActivityForResult(intent, PICK_PDF_REQUEST);
-        } catch (Exception e) {
-            pickPromise = null;
-            Log.e(TAG, "Failed to open PDF picker", e);
-            promise.reject("PICK_FAILED", e.getMessage());
+        } catch (Exception error) {
+            Promise promise = pendingPromise;
+            clearPickRequest();
+            if (promise != null) {
+                promise.reject("PICK_FAILED", error.getMessage(), error);
+            }
         }
+    }
+
+    private void handlePickedPdf(int resultCode, Intent data) {
+        Promise promise = pendingPromise;
+        boolean remember = rememberPickedPdf;
+        clearPickRequest();
+        if (promise == null) {
+            return;
+        }
+        if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) {
+            promise.reject("PICK_CANCELLED", "No PDF was selected");
+            return;
+        }
+        Uri uri = data.getData();
+        try {
+            reactContext.getContentResolver().takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (Exception ignored) {
+        }
+        new Thread(() -> {
+            try {
+                String copied = copyPickedUri(uri);
+                if (remember) {
+                    prefs().edit().putString(KEY_SAVED_PDF, copied).commit();
+                }
+                promise.resolve(copied);
+            } catch (Exception error) {
+                promise.reject("CONTENT_COPY_FAILED", error.getMessage(), error);
+            }
+        }, "pdf-pick").start();
+    }
+
+    private String copyPickedUri(Uri uri) throws Exception {
+        String name = displayName(uri);
+        try (InputStream in = reactContext.getContentResolver().openInputStream(uri)) {
+            if (in == null) {
+                throw new FileNotFoundException("Unable to open " + uri);
+            }
+            return writeStreamToAppFiles(in, name);
+        }
+    }
+
+    private String displayName(Uri uri) {
+        String name = null;
+        try (Cursor cursor = reactContext.getContentResolver().query(
+            uri,
+            new String[]{OpenableColumns.DISPLAY_NAME},
+            null,
+            null,
+            null
+        )) {
+            if (cursor != null && cursor.moveToFirst()) {
+                name = cursor.getString(0);
+            }
+        } catch (Exception ignored) {
+        }
+        if (name == null || name.isEmpty()) {
+            name = "selected.pdf";
+        }
+        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+        if (slash >= 0 && slash + 1 < name.length()) {
+            name = name.substring(slash + 1);
+        }
+        if (!name.toLowerCase().endsWith(".pdf")) {
+            name = name + ".pdf";
+        }
+        return name;
+    }
+
+    private void clearPickRequest() {
+        pendingPromise = null;
+        pendingPath = null;
+        leftForSettings = false;
+        pickAfterSettings = false;
+        awaitingDocumentPick = false;
+        rememberPickedPdf = false;
     }
 
     @Override
     public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
-        if (requestCode != PICK_PDF_REQUEST || pickPromise == null) {
+        if (requestCode == PICK_PDF_REQUEST) {
+            handlePickedPdf(resultCode, data);
             return;
         }
-        Promise promise = pickPromise;
-        pickPromise = null;
-        if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) {
-            promise.reject("PICK_CANCELLED", "PDF selection was cancelled");
+        if (requestCode != ALL_FILES_REQUEST || pendingPromise == null || awaitingDocumentPick) {
             return;
         }
-        try {
-            String path = copyPickedPdf(data.getData());
-            Log.i(TAG, "Picked PDF copied to " + path);
-            promise.resolve(path);
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to copy picked PDF", e);
-            promise.reject("PICK_COPY_FAILED", e.getMessage());
+        if (pickAfterSettings) {
+            if (Environment.isExternalStorageManager()) {
+                leftForSettings = false;
+                openPdfPicker();
+            }
+            return;
+        }
+        // The settings result can arrive before the app-op is visible.
+        // Leave a missing grant for onHostResume to check again.
+        if (Environment.isExternalStorageManager()) {
+            finishPending(true, true);
         }
     }
 
@@ -278,24 +376,269 @@ public class FileManager extends ReactContextBaseJavaModule implements ActivityE
     }
 
     @Override
-    public void onUserLeaveHint(Activity activity) {
+    public void onHostResume() {
+        if (awaitingDocumentPick || pendingPromise == null || !leftForSettings) {
+            return;
+        }
+        if (pickAfterSettings) {
+            if (hasAllFilesAccess() || hasLegacyReadAccess()) {
+                leftForSettings = false;
+                openPdfPicker();
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                finishPending(false, false);
+            }
+            return;
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return;
+        }
+        finishPending(Environment.isExternalStorageManager(), true);
     }
 
-    private String copyPickedPdf(Uri uri) throws IOException {
-        File dest = new File(reactContext.getFilesDir(), "merge-picked-" + System.currentTimeMillis() + ".pdf");
-        try (InputStream in = reactContext.getContentResolver().openInputStream(uri);
-             OutputStream out = new FileOutputStream(dest)) {
-            if (in == null) {
-                throw new IOException("Unable to open selected PDF");
+    @Override
+    public void onHostPause() {
+        if (pendingPromise != null && !awaitingDocumentPick) {
+            leftForSettings = true;
+        }
+    }
+
+    @Override
+    public void onHostDestroy() {
+        // The system settings screen often destroys this activity. Rejecting here
+        // reports PERMISSION_DENIED after the user has already turned the grant on.
+        // The next resume re-checks Environment.isExternalStorageManager().
+        if (leftForSettings || awaitingDocumentPick) {
+            return;
+        }
+        finishPending(false, false);
+    }
+
+    private void finishPending(boolean granted, boolean freshAllFilesGrant) {
+        Promise promise = pendingPromise;
+        String path = pendingPath;
+        pendingPromise = null;
+        pendingPath = null;
+        leftForSettings = false;
+        pickAfterSettings = false;
+        awaitingDocumentPick = false;
+        rememberPickedPdf = false;
+        if (promise == null) {
+            return;
+        }
+        if (!granted) {
+            promise.reject("PERMISSION_DENIED", "Storage access is required to open this PDF");
+            return;
+        }
+        resolveWithCopy(promise, path, freshAllFilesGrant);
+    }
+
+    private void resolveWithCopy(Promise promise, String path, boolean freshAllFilesGrant) {
+        new Thread(() -> {
+            try {
+                String copied = copySharedPdfToAppFiles(path);
+                clearRestarted();
+                promise.resolve(copied);
+            } catch (HiddenDownloadException hidden) {
+                if (hasAllFilesAccess() && !alreadyRestartedForGrant() && restartProcess()) {
+                    return;
+                }
+                promise.reject("FILE_NOT_FOUND", "PDF not found: " + normalizePath(path));
+            } catch (Exception error) {
+                if (freshAllFilesGrant && !alreadyRestartedForGrant() && restartProcess()) {
+                    return;
+                }
+                promise.reject("FILE_NOT_FOUND", "PDF not found: " + normalizePath(path));
             }
+        }, "pdf-import").start();
+    }
+
+    private static final class HiddenDownloadException extends Exception {
+    }
+
+    private String copySharedPdfToAppFiles(String path) throws Exception {
+        String normalized = normalizePath(path);
+        String name = fileNameOf(normalized);
+        File source = new File(normalized);
+        if (!source.isFile()) {
+            source = findNamedDownload(name);
+        }
+        if (source != null && source.isFile()) {
+            return copyFileToAppFiles(source, name);
+        }
+        String fromStore = copyMediaStoreDownload(name);
+        if (fromStore != null) {
+            return fromStore;
+        }
+        if (hasAllFilesAccess() && !canListDownload()) {
+            throw new HiddenDownloadException();
+        }
+        throw new FileNotFoundException(normalized + ": open failed: ENOENT (No such file or directory)");
+    }
+
+    private File findNamedDownload(String name) {
+        File[] directories = new File[] {
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            new File("/storage/emulated/0/Download"),
+            new File("/storage/emulated/0/Downloads"),
+        };
+        for (File directory : directories) {
+            if (directory == null) {
+                continue;
+            }
+            File direct = new File(directory, name);
+            if (direct.isFile()) {
+                return direct;
+            }
+            File[] children = directory.listFiles();
+            if (children == null) {
+                continue;
+            }
+            for (File child : children) {
+                if (child.isFile() && name.equals(child.getName())) {
+                    return child;
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean canListDownload() {
+        File[] directories = new File[] {
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            new File("/storage/emulated/0/Download"),
+            new File("/storage/emulated/0/Downloads"),
+        };
+        for (File directory : directories) {
+            if (directory != null && directory.isDirectory() && directory.list() != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String copyMediaStoreDownload(String displayName) throws Exception {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || displayName.isEmpty()) {
+            return null;
+        }
+        Uri collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+        String[] projection = new String[] {MediaStore.Downloads._ID};
+        try (Cursor cursor = reactContext.getContentResolver().query(
+            collection,
+            projection,
+            MediaStore.Downloads.DISPLAY_NAME + "=?",
+            new String[] {displayName},
+            null
+        )) {
+            if (cursor == null || !cursor.moveToFirst()) {
+                return null;
+            }
+            long id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID));
+            Uri item = ContentUris.withAppendedId(collection, id);
+            try (InputStream in = reactContext.getContentResolver().openInputStream(item)) {
+                if (in == null) {
+                    return null;
+                }
+                return writeStreamToAppFiles(in, displayName);
+            }
+        } catch (SecurityException ignored) {
+            return null;
+        }
+    }
+
+    private String copyFileToAppFiles(File source, String name) throws Exception {
+        if (name == null || name.isEmpty()) {
+            name = "imported.pdf";
+        }
+        File dest = new File(reactContext.getFilesDir(), name);
+        if (source.getAbsolutePath().equals(dest.getAbsolutePath())) {
+            return dest.getAbsolutePath();
+        }
+        try (InputStream in = new FileInputStream(source)) {
+            return writeStreamToAppFiles(in, name);
+        }
+    }
+
+    private String writeStreamToAppFiles(InputStream in, String name) throws Exception {
+        File dest = new File(reactContext.getFilesDir(), name);
+        try (OutputStream out = new FileOutputStream(dest)) {
             byte[] buffer = new byte[8192];
             int read;
             while ((read = in.read(buffer)) != -1) {
                 out.write(buffer, 0, read);
             }
+        } catch (Exception error) {
+            dest.delete();
+            throw error;
         }
         return dest.getAbsolutePath();
     }
+
+    private String fileNameOf(String path) {
+        int slash = path.lastIndexOf('/');
+        String name = slash >= 0 ? path.substring(slash + 1) : path;
+        return name == null || name.isEmpty() ? "imported.pdf" : name;
+    }
+
+    private boolean restartProcess() {
+        Intent launch = reactContext.getPackageManager().getLaunchIntentForPackage(reactContext.getPackageName());
+        if (launch == null) {
+            return false;
+        }
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        markRestarted();
+        try {
+            reactContext.startActivity(launch);
+        } catch (Exception error) {
+            clearRestarted();
+            return false;
+        }
+        Process.killProcess(Process.myPid());
+        return true;
+    }
+
+    private SharedPreferences prefs() {
+        return reactContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private boolean alreadyRestartedForGrant() {
+        return prefs().getBoolean(KEY_RESTART, false);
+    }
+
+    private void markRestarted() {
+        prefs().edit().putBoolean(KEY_RESTART, true).commit();
+    }
+
+    private void clearRestarted() {
+        prefs().edit().remove(KEY_RESTART).commit();
+    }
+
+    private String normalizePath(String path) {
+        if (path != null && path.startsWith("file://")) {
+            return path.substring(7);
+        }
+        return path == null ? "" : path;
+    }
+
+    private boolean hasAllFilesAccess() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager();
+    }
+
+    private boolean hasLegacyReadAccess() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.R
+            && ContextCompat.checkSelfPermission(reactContext, Manifest.permission.READ_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean isAppPrivate(String path) {
+        if (path == null || path.startsWith("content://")) {
+            return false;
+        }
+        String normalized = path.startsWith("file://") ? path.substring(7) : path;
+        String dataDir = reactContext.getApplicationInfo().dataDir;
+        File external = reactContext.getExternalFilesDir(null);
+        return normalized.startsWith(reactContext.getFilesDir().getAbsolutePath())
+            || normalized.startsWith(reactContext.getCacheDir().getAbsolutePath())
+            || (dataDir != null && normalized.startsWith(dataDir))
+            || (external != null && normalized.startsWith(external.getAbsolutePath()));
+    }
 }
-
-
